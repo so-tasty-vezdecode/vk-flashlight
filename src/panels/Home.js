@@ -1,116 +1,93 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import PropTypes from 'prop-types';
 
+import PropTypes from 'prop-types';
 import bridge from '@vkontakte/vk-bridge';
-import { Panel, PanelHeader, Div, Text, Button } from '@vkontakte/vkui';
+import { Panel, PanelHeader, Button, Div, Title, Spacing } from '@vkontakte/vkui';
 
 import FlashLightButton from '../components/FlashLightButton';
+import useAppHide from '../hooks/useAppHide';
+import useFlashlightButtons from '../hooks/useFlashlightButtons';
+import useFlashlightLoop from '../hooks/useFlashlightLoop';
+import CenteredDiv from '../components/CenteredDiv';
 
 const BUTTON_COUNT = 8;
 
 const Home = ({ id }) => {
-	const [buttonsState, setButtonsState] = useState(new Array(BUTTON_COUNT).fill(false));
 	const [isFlashLightAvailable, setFlashLightAvailability] = useState(false);
-	const [currentFlashlightIndex, setIndex] = useState(null);
 
-	const buttonsStateRef = useRef(buttonsState);
-	const interval = useRef(null);
+	const { flashlightButtons, toggleFlashlightButton } = useFlashlightButtons({ count: BUTTON_COUNT });
+	const flashlightButtonsRef = useRef(flashlightButtons);
 
-	const onFlashLightButtonChange = useCallback((e, index) => {
-		const newState = [...buttonsState];
-		newState[index] = e.target.checked;
+	useAppHide(() => setFlashlightState(0));
 
-		setButtonsState(newState);
-		buttonsStateRef.current = newState;
-	}, [buttonsState]);
+	const { startFlashing, stopFlashing, activeFlashlightButton } = useFlashlightLoop({
+		flashlightButtonsRef,
+		maxButtonsCount: BUTTON_COUNT,
+		timeoutMs: 1000,
+	});
 
-	useEffect(() => {
-		const listener = ({ detail }) => {
-			console.log(detail);
-			if (detail.type === 'VKWebAppViewHide') {
-				setFlashlightState(0);
-			}
-		}
-
-		bridge.subscribe(listener);
-
-		return () => bridge.unsubscribe(listener);
-	}, []);
-
-	useEffect(() => {
-		bridge.send("VKWebAppFlashGetInfo")
-			.then(({ is_available }) => setFlashLightAvailability(is_available))
-			.catch(console.log);
-	}, []);
-
-	const setFlashlightState = useCallback(async (level) => {
-		await bridge.send("VKWebAppFlashSetLevel", { level })
-			.then(console.log)
-			.catch(console.log);
-	}, []);
-
-	const startFlashing = useCallback(async () => {
-		let currentIndex = currentFlashlightIndex;
-
-		const call = async () => {
-			const nextIndex = currentIndex + 1 >= BUTTON_COUNT || currentIndex === null ? 0 : currentIndex + 1;
-
-			currentIndex = nextIndex;
-			setIndex(nextIndex);
-
-			if (currentIndex === null || buttonsStateRef.current[currentIndex] !== buttonsStateRef.current[currentIndex - 1]) {
-				await setFlashlightState(Number(buttonsStateRef.current[currentIndex]));
-			}
-
-			interval.current = setTimeout(call, 1000);
-		}
-
-		interval.current = setTimeout(call, 1000);
-	}, [setFlashlightState, currentFlashlightIndex]);
-
-	const stopFlashing = useCallback(
-		() => {
-			clearTimeout(interval.current);
-
-			setIndex(null);
-			setFlashlightState(0);
+	const onFlashLightButtonChange = useCallback(
+		(isChecked, index) => {
+			flashlightButtonsRef.current = toggleFlashlightButton(index, isChecked);
 		},
-		[setFlashlightState],
+		[toggleFlashlightButton],
 	);
 
-	useEffect(() => {
-		() => clearTimeout(interval.current);
-	}, [])
+	useEffect(
+		() => {
+			bridge.send("VKWebAppFlashGetInfo")
+				.then(({ is_available }) => setFlashLightAvailability(is_available))
+				.catch(() => setFlashLightAvailability(false));
+		},
+		[],
+	);
 
 	return (
-		<Panel id={id}>
-			<PanelHeader>Flashlight</PanelHeader>
+		<Panel id={id} centered>
+			<PanelHeader>Зажигалка!</PanelHeader>
 
-			<Div style={{ display: 'flex', justifyContent: 'center' }}>
+			<CenteredDiv style={{ width: '100%' }}>
 				{
-					isFlashLightAvailable ? (
-						buttonsState.map((state, index) => {
-							return (
-								<FlashLightButton
-									key={index}
-									state={state}
-									onChange={(e) => onFlashLightButtonChange(e, index)}
-									active={currentFlashlightIndex === index}
-								/>
-							);
-						})
-					) :
-						<Text size={2}>Нет доступа к вспышке :(</Text>
+					!isFlashLightAvailable && (
+						<Title weight="medium">Нет доступа к вспышке :(</Title>
+					)
 				}
-			</Div>
 
-			<Div style={{ display: 'flex', justifyContent: 'center' }}>
 				{
-					currentFlashlightIndex !== null
-						? <Button size="m" style={{ width: '100%' }} onClick={stopFlashing}>Остановить</Button>
-						: <Button size="m" style={{ width: '100%' }} onClick={startFlashing}>Начать</Button>
+					isFlashLightAvailable && (
+						<Div style={{ width: '100%' }}>
+							<div style={{ display: 'flex', justifyContent: 'space-between' }}>
+								{
+									flashlightButtons.map((state, index) => {
+										return (
+											<FlashLightButton
+												key={index}
+												state={state}
+												onChange={e => onFlashLightButtonChange(e, index)}
+												isActive={activeFlashlightButton === index}
+											/>
+										);
+									})
+								}
+							</div>
+
+							<Spacing size={16} />
+
+							<Button
+								size="l"
+								mode={activeFlashlightButton !== null ? 'secondary' : 'commerce'}
+								style={{ width: '100%' }}
+								type="error"
+								onClick={activeFlashlightButton !== null ? stopFlashing : startFlashing}
+							>
+								{
+									activeFlashlightButton !== null ? 'Остановиться' : 'Зажигаем!'
+								}
+							</Button>
+						</Div>
+					)
 				}
-			</Div>
+			</CenteredDiv>
 		</Panel>
 	);
 }
